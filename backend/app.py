@@ -158,6 +158,7 @@ def replan(u=Depends(uid)):
     now = datetime.now(); td = now.weekday(); nm = -(-(now.hour * 60 + now.minute) // 5) * 5
     unplaced = []
     with db() as c:
+        mon = date.today() - timedelta(days=td)
         wk = (date.today() - timedelta(days=td)).isoformat()
         c.execute("DELETE FROM slots WHERE user_id=? AND week=? AND pinned=0 AND status='planned' AND (day>? OR (day=? AND start>=?))", (u, wk, td, td, nm))
         lim = c.execute("SELECT limit_h FROM users WHERE id=?", (u,)).fetchone()[0] * 60
