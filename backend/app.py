@@ -23,7 +23,7 @@ with db() as _c:
     CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, user_id INT, rating INT, text TEXT, created TEXT);
     CREATE TABLE IF NOT EXISTS slots(id INTEGER PRIMARY KEY, user_id INT, task_id INT, day INT, start INT, end INT, status TEXT DEFAULT 'planned');
     """)
-    for tb, col in (("busy", "cat TEXT DEFAULT 'study'"), ("tasks", "cat TEXT DEFAULT 'study'"), ("slots", "week TEXT DEFAULT ''"), ("slots", "pinned INT DEFAULT 0")):
+   for tb, col in (("busy", "cat TEXT DEFAULT 'study'"), ("tasks", "cat TEXT DEFAULT 'study'"), ("tasks", "deadline_date TEXT"), ("slots", "week TEXT DEFAULT ''"), ("slots", "pinned INT DEFAULT 0")):
         try: _c.execute(f"ALTER TABLE {tb} ADD COLUMN {col}")
         except sqlite3.OperationalError: pass
     _c.execute("UPDATE slots SET week=? WHERE week='' OR week IS NULL", ((date.today() - timedelta(days=date.today().weekday())).isoformat(),))
