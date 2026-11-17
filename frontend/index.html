@@ -96,7 +96,7 @@ main{display:grid;grid-template-columns:268px 1fr;gap:18px;padding:16px 20px;max
  <div class=tabs><button id=m1 onclick="mtab('event')">Фіксована подія</button><button id=m2 onclick="mtab('task')">Завдання з дедлайном</button></div>
  <label for=f_t>Назва</label><input id=f_t class=w placeholder="Напр. Лекція з економіки"><label>Категорія</label><div class=chips id=fc></div>
  <div id=fe><div class=row><div><label for=f_d>День</label><select id=f_d class=w></select></div><div><label for=f_s>З</label><input id=f_s type=time class=w></div><div><label for=f_e>До</label><input id=f_e type=time class=w></div></div></div>
-  <div id=ft hidden><div class=row><div><label for=f_h>Годин</label><input id=f_h type=number min=.5 step=.5 value=3 class=w></div><div><label for=f_dl>Зробити до <span class=mute>(або без дати)</span></label><input id=f_dl type=date class=w></div></div></div>
+ <div id=ft hidden><div class=row><div><label for=f_h>Годин</label><input id=f_h type=number min=.5 step=.5 value=3 class=w></div><div><label for=f_dl>Зробити до</label><select id=f_dl class=w></select></div></div></div>
  <div class=act><button class=ghost onclick=closeM()>Скасувати</button><button class=btn onclick=saveM()>Зберегти</button></div></div></div>
 <div id=fb hidden style="position:fixed;inset:0;background:#0f172a8c;z-index:30;display:grid;place-items:center;padding:12px" onmousedown="if(event.target==this)this.hidden=true"><div class=mdl><h2 style="font-size:18px">Ваш відгук про StudyTime</h2>
  <label for=fb_r>Оцінка</label><select id=fb_r class=w><option value=5>5 — чудово</option><option value=4>4</option><option value=3>3</option><option value=2>2</option><option value=1>1 — погано</option></select>
@@ -109,7 +109,7 @@ const CATS={study:{n:"Навчання",h:232},project:{n:"Проєкт",h:285},
 let T=localStorage.getItem("t"),M="signup",ST=null,W=0,HID=new Set(),FC="study",MT="event",EDIT=null,DRAG=null;
 const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])),p2=n=>String(n).padStart(2,"0"),hm=m=>p2(Math.floor(m/60))+":"+p2(m%60),mn=s=>{const[a,b]=(s||"0:0").split(":");return a*60+ +b},h1=m=>Math.round(m/6)/10;
 const mon=()=>{const d=new Date();d.setHours(0,0,0,0);d.setDate(d.getDate()-((d.getDay()+6)%7)+7*W);return d},iso=d=>`${d.getFullYear()}-${p2(d.getMonth()+1)}-${p2(d.getDate())}`,hue=c=>(CATS[c]||CATS.study).h;
-const dayOpts=D.map((d,i)=>`<option value=${i}>${d}</option>`).join("");$("#f_d").innerHTML=dayOpts;
+const dayOpts=D.map((d,i)=>`<option value=${i}>${d}</option>`).join("");$("#f_d").innerHTML=dayOpts;$("#f_dl").innerHTML='<option value="">Без дедлайну</option>'+D.map((d,i)=>`<option value=${i}>${d}</option>`).join("");
 function toast(t,err){const e=$("#toast");e.textContent=t;e.className=err?"err":"";e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,3200)}
 async function api(p,m="GET",b){try{const r=await fetch("/api/"+p,{method:m,headers:{"Content-Type":"application/json",...(T?{Authorization:"Bearer "+T}:{})},body:b?JSON.stringify(b):undefined});
 const j=await r.json().catch(()=>({}));if(r.status==401&&T){logout();return}if(!r.ok)throw Error(typeof j.detail=="string"?j.detail:"Перевірте введені дані");return j}catch(e){toast(e.message,1)}}
@@ -129,9 +129,7 @@ function mtab(t){MT=t;$("#m1").className=t=="event"?"on":"";$("#m2").className=t
 function closeM(){$("#mo").hidden=true}
 async function saveM(){const t=$("#f_t").value.trim()||(MT=="event"?"Подія":"Завдання");let r;
  if(MT=="event"){const s=mn($("#f_s").value),e=mn($("#f_e").value);if(e<=s)return toast("Кінець має бути пізніше за початок",1);r=await api(EDIT?`busy/${EDIT.id}`:"busy",EDIT?"PUT":"POST",{day:+$("#f_d").value,start:s,end:e,title:t,cat:FC})}
- else{const dl=$("#f_dl").value,h=+$("#f_h").value;if(!(h>0))return toast("Вкажіть кількість годин",1);r=await api(EDIT?`tasks/${EDIT.id}`:"tasks",EDIT?"PUT":"POST",{title:t,kind:dl?"deadline":"regular",hours:h,deadline_date:dl||null,cat:FC})}
- if(r){closeM();toast(EDIT?"Збережено":MT=="task"?"Завдання додано. Натисніть «Перепланувати»":"Подію додано");show()}}
-function editTask(id){const t=ST.tasks.find(x=>x.id==id);openM({tab:"task",edit:{id},title:t.title,cat:t.cat,hours:t.hours,dl:t.deadline_date||""})}
+ else{const dl=$("#f_dl").value,h=+$("#f_h").value;if(!(h>0))return toast("Вкажіть кількість годин",1);r=await api(EDIT?`tasks/${EDIT.id}`:"tasks",EDIT?"PUT":"POST",{title:t,kind:dl===""?"regular":"deadline",hours:h,deadline_day:dl===""?null:+dl,cat:FC})}
  if(r){closeM();toast(EDIT?"Збережено":MT=="task"?"Завдання додано. Натисніть «Перепланувати»":"Подію додано");show()}}
 function editTask(id){const t=ST.tasks.find(x=>x.id==id);openM({tab:"task",edit:{id},title:t.title,cat:t.cat,hours:t.hours,dl:t.kind=="deadline"?t.deadline_day:""})}
 function editBusy(id){const b=ST.busy.find(x=>x.id==id);openM({tab:"event",edit:{id},title:b.title,cat:b.cat,day:b.day,start:b.start,end:b.end})}
@@ -154,8 +152,7 @@ async function drp(e,d){e.preventDefault();if(!DRAG)return;if(DRAG.task){const r
 function draw(){const s=ST,wk=iso(mon()),sl=s.slots.filter(x=>x.week==wk),vis=c=>!HID.has(c||"study");
  const a=mon(),b=new Date(a);b.setDate(a.getDate()+6);$("#wt").textContent=a.getMonth()==b.getMonth()?`${a.getDate()} – ${b.getDate()} ${MO[b.getMonth()]} ${b.getFullYear()}`:`${a.getDate()} ${MO[a.getMonth()]} – ${b.getDate()} ${MO[b.getMonth()]} ${b.getFullYear()}`;
  $("#leg").innerHTML=Object.entries(CATS).map(([k,c])=>`<label style="--h:${c.h}"><input type=checkbox class=cb ${HID.has(k)?"":"checked"} onchange="HID.has('${k}')?HID.delete('${k}'):HID.add('${k}');draw()">${c.n}</label>`).join("");
- $("#tasks").innerHTML=s.tasks.length?s.tasks.map(t=>{const d=sl.filter(x=>x.task_id==t.id&&x.status=="done").reduce((q,x)=>q+x.end-x.start,0);return `<div class=tk style="--h:${hue(t.cat)}" draggable=true ondragstart="tdst(event,${t.id})" onclick="editTask(${t.id})" title="Перетягніть у календар"><span class=gr>${I('grip',14)}</span><div class=g><div class=nm>${esc(t.title)}</div><div class=mt>${h1(d)} / ${t.hours} год${t.deadline_date?" · до "+t.deadline_date.split("-").reverse().slice(0,2).join("."):(t.kind=="deadline"&&t.deadline_day!=null?" · до "+D[t.deadline_day]:"")}
-</div><div class=bar><b style="width:${Math.min(100,d/(t.hours*60)*100)}%"></b></div></div><button class="ic del" aria-label=Видалити onclick="event.stopPropagation();del('tasks',${t.id})">${I('trash')}</button></div>`}).join(""):'<div class=mute>Поки немає завдань. Натисніть «Створити».</div>';
+ $("#tasks").innerHTML=s.tasks.length?s.tasks.map(t=>{const d=sl.filter(x=>x.task_id==t.id&&x.status=="done").reduce((q,x)=>q+x.end-x.start,0);return `<div class=tk style="--h:${hue(t.cat)}" draggable=true ondragstart="tdst(event,${t.id})" onclick="editTask(${t.id})" title="Перетягніть у календар"><span class=gr>${I('grip',14)}</span><div class=g><div class=nm>${esc(t.title)}</div><div class=mt>${h1(d)} / ${t.hours} год${t.kind=="deadline"?" · до "+D[t.deadline_day]:""}</div><div class=bar><b style="width:${Math.min(100,d/(t.hours*60)*100)}%"></b></div></div><button class="ic del" aria-label=Видалити onclick="event.stopPropagation();del('tasks',${t.id})">${I('trash')}</button></div>`}).join(""):'<div class=mute>Поки немає завдань. Натисніть «Створити».</div>';
  const sum=st=>sl.filter(x=>x.status==st).reduce((q,x)=>q+x.end-x.start,0),pl=sum("planned"),dn=sum("done");$("#s1").textContent=h1(pl+dn);$("#s2").textContent=h1(dn);$("#s3").textContent=h1(sum("missed"));
  const pc=pl+dn?Math.round(dn/(pl+dn)*100):0;$("#pb").style.width=pc+"%";$("#pp").textContent=pc+"%";
  const nd=new Date(),td=W==0?(nd.getDay()+6)%7:-1,nm=nd.getHours()*60+nd.getMinutes(),H=(E-S)*PX,showNow=W==0&&nm>=S&&nm<=E;
