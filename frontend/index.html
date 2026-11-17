@@ -66,10 +66,11 @@ main{display:grid;grid-template-columns:268px 1fr;gap:18px;padding:16px 20px;max
 @media(prefers-reduced-motion:reduce){*{transition:none!important}}
 </style></head><body>
 <div id=auth hidden>
- <div class=hero><div class=logo>📚 StudyTime</div><h1>План навчання, який переживе ваш тиждень</h1>
- <p>Внесіть пари, роботу й сон — StudyTime сам розкладе підготовку у вільні вікна. Щось пішло не так? Одна кнопка — і залишок тижня перебудовано.</p>
+ <div class=hero><div class=logo>📚 StudyTime</div><h1></h1>Встигати все і не вигорати під час сесії</h1>
+ <p>Внесіть свій сталий графік та навчальні цілі. StudyTime автоматично розподілить підготовку по тижню, враховуючи ваш денний ліміт годин, і миттєво підлаштується під зміни.
+</p>
  <div class=demo aria-hidden=true><i style="height:40%"></i><i class=s style="--h:220;height:70%"></i><i style="height:55%"></i><i class=s style="--h:160;height:45%"></i><i class=s style="--h:265;height:85%"></i><i style="height:35%"></i><i class=s style="--h:220;height:60%"></i></div></div>
- <div class=box><h2 id=at>Створіть акаунт</h2><div class=mute>Займає хвилину. Без підтверджень пошти.</div>
+ <div class=box><h2 id=at>Створіть акаунт</h2><div class=mute></div>
  <div class=tabs><button id=tsu class=on onclick="mode('signup')">Реєстрація</button><button id=tli onclick="mode('login')">Вхід</button></div>
  <label for=em>Email</label><input id=em type=email autocomplete=email class=w><label for=pw>Пароль (мінімум 6 символів)</label><input id=pw type=password autocomplete=current-password class=w>
  <button class="btn w" id=ab style="margin-top:16px" onclick=submitAuth()>Зареєструватися</button></div>
