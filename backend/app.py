@@ -23,7 +23,7 @@ with db() as _c:
     CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, user_id INT, rating INT, text TEXT, created TEXT);
     CREATE TABLE IF NOT EXISTS slots(id INTEGER PRIMARY KEY, user_id INT, task_id INT, day INT, start INT, end INT, status TEXT DEFAULT 'planned');
     """)
-    for tb, col in (("busy", "cat TEXT DEFAULT 'study'"), ("tasks", "cat TEXT DEFAULT 'study'"), ("tasks", "deadline_date TEXT"), ("slots", "week TEXT DEFAULT ''"), ("slots", "pinned INT DEFAULT 0")):
+    for tb, col in (("busy", "cat TEXT DEFAULT 'study'"), ("tasks", "cat TEXT DEFAULT 'study'"), ("slots", "week TEXT DEFAULT ''"), ("slots", "pinned INT DEFAULT 0")):
         try: _c.execute(f"ALTER TABLE {tb} ADD COLUMN {col}")
         except sqlite3.OperationalError: pass
     _c.execute("UPDATE slots SET week=? WHERE week='' OR week IS NULL", ((date.today() - timedelta(days=date.today().weekday())).isoformat(),))
@@ -48,7 +48,7 @@ class Cred(BaseModel): email: str; password: str
 class Busy(BaseModel): day: int; start: int; end: int; title: str; cat: str = 'study'
 class NewSlot(BaseModel): task_id: int; day: int; start: int; end: int; week: str
 class Move(BaseModel): day: int; start: int; end: int
-class Task(BaseModel): title: str; kind: str = "regular"; hours: float; deadline_day: int | None = None; deadline_date: str | None = None; cat: str = 'study'
+class Task(BaseModel): title: str; kind: str = "regular"; hours: float; deadline_day: int | None = None; cat: str = 'study'
 class Limit(BaseModel): hours: float
 class Feedback(BaseModel): rating: int; text: str
 
@@ -90,7 +90,7 @@ def del_busy(i: int, u=Depends(uid)):
 @app.post("/api/tasks")
 def add_task(t: Task, u=Depends(uid)):
     if t.hours <= 0 or t.kind not in ("regular", "deadline"): raise HTTPException(400, "Некоректне завдання")
-    with db() as c: c.execute("INSERT INTO tasks(user_id,title,kind,hours,deadline_day,deadline_date,cat) VALUES(?,?,?,?,?,?,?)", (u, t.title, t.kind, t.hours, t.deadline_day, t.deadline_date or None, t.cat))
+    with db() as c: c.execute("INSERT INTO tasks(user_id,title,kind,hours,deadline_day,cat) VALUES(?,?,?,?,?,?)", (u, t.title, t.kind, t.hours, t.deadline_day, t.cat))
     return {}
 
 @app.delete("/api/tasks/{i}")
@@ -119,7 +119,7 @@ def edit_busy(i: int, b: Busy, u=Depends(uid)):
 @app.put("/api/tasks/{i}")
 def edit_task(i: int, t: Task, u=Depends(uid)):
     if t.hours <= 0 or t.kind not in ("regular", "deadline"): raise HTTPException(400, "Некоректне завдання")
-    with db() as c: c.execute("UPDATE tasks SET title=?,kind=?,hours=?,deadline_day=?,deadline_date=?,cat=? WHERE id=? AND user_id=?", (t.title, t.kind, t.hours, t.deadline_day, t.deadline_date or None, t.cat, i, u))
+    with db() as c: c.execute("UPDATE tasks SET title=?,kind=?,hours=?,deadline_day=?,cat=? WHERE id=? AND user_id=?", (t.title, t.kind, t.hours, t.deadline_day, t.cat, i, u))
     return {}
 
 @app.post("/api/slots")
@@ -158,8 +158,7 @@ def replan(u=Depends(uid)):
     now = datetime.now(); td = now.weekday(); nm = -(-(now.hour * 60 + now.minute) // 5) * 5
     unplaced = []
     with db() as c:
-        mon = date.today() - timedelta(days=td)
-        wk = mon.isoformat()
+        wk = (date.today() - timedelta(days=td)).isoformat()
         c.execute("DELETE FROM slots WHERE user_id=? AND week=? AND pinned=0 AND status='planned' AND (day>? OR (day=? AND start>=?))", (u, wk, td, td, nm))
         lim = c.execute("SELECT limit_h FROM users WHERE id=?", (u,)).fetchone()[0] * 60
         days = {"wk": wk}
@@ -175,7 +174,22 @@ def replan(u=Depends(uid)):
             if END - cur >= 30: gaps.append([cur, END])
             days[d] = {"gaps": gaps, "cap": max(0, lim - sum(r["end"] - r["start"] for r in sl))}
         tasks = c.execute("SELECT * FROM tasks WHERE user_id=?", (u,)).fetchall()
-        def dl_end(t):
-            if t["deadline_date"]:
-                try: return min(6, (date.fromisoformat(t["deadline_date"]) - mon).days)
-                except ValueError: pass
+        key = lambda t: (0, t["deadline_day"]) if t["kind"] == "deadline" and t["deadline_day"] is not None else (1, 7)
+        for t in sorted(tasks, key=key):
+            used = c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned') AND week=?", (t["id"], wk)).fetchone()[0]
+            rem = int(t["hours"] * 60) - used
+            if rem <= 0: continue
+            dl = t["deadline_day"] if t["kind"] == "deadline" and t["deadline_day"] is not None else 6
+            rng = range(td, max(dl, td) + 1)
+            rem = place(c, u, t, rem, days, rng, -(-rem // len(rng) // 30) * 30 or 30)  # spread evenly
+            rem = place(c, u, t, rem, days, rng, 10**6)                                  # then fill what's left
+            if rem > 0: unplaced.append({"title": t["title"], "minutes": rem})
+    return {"unplaced": unplaced}
+
+@app.post("/api/feedback")
+def feedback(f: Feedback, u=Depends(uid)):
+    if not (1 <= f.rating <= 5) or not f.text.strip(): raise HTTPException(400, "Вкажіть оцінку й текст")
+    with db() as c: c.execute("INSERT INTO feedback(user_id,rating,text,created) VALUES(?,?,?,?)", (u, f.rating, f.text.strip()[:2000], datetime.now().isoformat(timespec="minutes")))
+    return {}
+
+app.mount("/", StaticFiles(directory=FRONT, html=True), name="front")
