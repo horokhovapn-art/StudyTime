@@ -6,7 +6,7 @@ exceeding a daily workload limit. When a block is missed, **Replan** rebuilds th
 
 Team: Sofiia Volvach, Sofiia Horokhova. Course: Architecture and Design, UCU, Fall 2026.
 
-**Demo:** `https://<your-demo-url>`  ·  Sign up with any email and a password of 6+ characters.
+**Demo:** https://63.176.50.123.nip.io ·  Sign up with any email and a password of 6+ characters.
 
 ## Features
 - Sign-up / sign-in (JWT, PBKDF2-hashed passwords); every user sees only their own data
