@@ -153,64 +153,70 @@ def del_slot(i: int, u=Depends(uid)):
     return {}
 
 def place(c, u, t, rem, days, rng, per):
-    for d in rng:
-        D, got = days[d], 0
+    for k in rng:
+        D, got = days[k], 0
         for g in D["gaps"]:
             while rem > 0 and D["cap"] > 0 and got < per and g[1] - g[0] >= 30:
                 n = min(90, g[1] - g[0], rem, D["cap"], per - got)
                 if n <= 0: break
-                c.execute("INSERT INTO slots(user_id,task_id,day,start,end,week) VALUES(?,?,?,?,?,?)", (u, t["id"], d, g[0], g[0] + n, days["wk"]))
+                c.execute("INSERT INTO slots(user_id,task_id,day,start,end,week) VALUES(?,?,?,?,?,?)", (u, t["id"], D["d"], g[0], g[0] + n, D["wk"]))
                 g[0] += n + 10; D["cap"] -= n; got += n; rem -= n
     return rem
 
+def fill(c, u, t, rem, days, rng):
+    rem = place(c, u, t, rem, days, rng, -(-rem // len(rng) // 30) * 30 or 30)
+    return place(c, u, t, rem, days, rng, 10**6)
+
 @app.post("/api/replan")
 def replan(u=Depends(uid)):
-    """Smart Fit: rebuild plan for the rest of the week in the free windows, respecting daily load limit."""
-    now = datetime.now(); td = now.weekday(); nm = -(-(now.hour * 60 + now.minute) // 5) * 5
-    unplaced = []
+    """Smart Fit: plan from today up to the last deadline (up to 12 weeks ahead) in the free windows, respecting the daily limit."""
+    now = datetime.now(); today = date.today(); td = today.weekday(); nm = -(-(now.hour * 60 + now.minute) // 5) * 5
+    mon = today - timedelta(days=td); wk = mon.isoformat()
+    unplaced, overdue = {}, []
     with db() as c:
-        mon = date.today() - timedelta(days=td)
-        wk = (date.today() - timedelta(days=td)).isoformat()
         c.execute("UPDATE slots SET status='missed' WHERE user_id=? AND status='planned' AND (week<? OR (week=? AND (day<? OR (day=? AND end<=?))))", (u, wk, wk, td, td, nm))
-        c.execute("DELETE FROM slots WHERE user_id=? AND week=? AND pinned=0 AND status='planned' AND (day>? OR (day=? AND start>=?))", (u, wk, td, td, nm))
+        c.execute("DELETE FROM slots WHERE user_id=? AND pinned=0 AND status='planned' AND (week>? OR (week=? AND (day>? OR (day=? AND start>=?))))", (u, wk, wk, td, td, nm))
         lim = c.execute("SELECT limit_h FROM users WHERE id=?", (u,)).fetchone()[0] * 60
-        days = {"wk": wk}
-        for d in range(td, 7):
-            d_iso = (mon + timedelta(days=d)).isoformat()
-            iv = [(r["start"], r["end"]) for r in c.execute("SELECT start,end FROM busy WHERE user_id=? AND day=? AND (event_date IS NULL OR event_date='' OR event_date=?)", (u, d, d_iso))]
-            sl = c.execute("SELECT start,end FROM slots WHERE user_id=? AND day=? AND week=? AND status!='missed'", (u, d, wk)).fetchall()
-            iv += [(r["start"], r["end"]) for r in sl]
-            if d == td: iv.append((0, nm))
-            gaps, cur = [], START
-            for a, b in sorted(iv):
-                if a - cur >= 30: gaps.append([cur, a])
-                cur = max(cur, b)
-            if END - cur >= 30: gaps.append([cur, END])
-            days[d] = {"gaps": gaps, "cap": max(0, lim - sum(r["end"] - r["start"] for r in sl))}
         tasks = c.execute("SELECT * FROM tasks WHERE user_id=?", (u,)).fetchall()
-        today, overdue = date.today(), []
         def due(t):
             if t["deadline_date"]:
                 try: return date.fromisoformat(t["deadline_date"])
                 except ValueError: pass
             if t["kind"] == "deadline" and t["deadline_day"] is not None: return mon + timedelta(days=t["deadline_day"])
             return None
+        far = max([x for x in map(due, tasks) if x] or [today])
+        H = min(max((far - mon).days // 7 + 1, 1), 12)
+        K = H * 7 - td
+        days = {}
+        for k in range(K):
+            day = today + timedelta(days=k); d = day.weekday(); w = (day - timedelta(days=d)).isoformat()
+            iv = [(r["start"], r["end"]) for r in c.execute("SELECT start,end FROM busy WHERE user_id=? AND day=? AND (event_date IS NULL OR event_date='' OR event_date=?)", (u, d, day.isoformat()))]
+            sl = c.execute("SELECT start,end FROM slots WHERE user_id=? AND day=? AND week=? AND status!='missed'", (u, d, w)).fetchall()
+            iv += [(r["start"], r["end"]) for r in sl]
+            if k == 0: iv.append((0, nm))
+            gaps, cur = [], START
+            for a, b in sorted(iv):
+                if a - cur >= 30: gaps.append([cur, a])
+                cur = max(cur, b)
+            if END - cur >= 30: gaps.append([cur, END])
+            days[k] = {"d": d, "wk": w, "gaps": gaps, "cap": max(0, lim - sum(r["end"] - r["start"] for r in sl))}
         for t in sorted(tasks, key=lambda t: (due(t) is None, due(t) or date.max)):
-            dd = due(t)
-            if dd is None:  # no deadline: a weekly goal, hours per week
-                rem = int(t["hours"] * 60) - c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned') AND week=?", (t["id"], wk)).fetchone()[0]
-                last = 6
-            else:  # deadline on a date: hours are a TOTAL over all weeks; this week gets its share of the days left
-                left = int(t["hours"] * 60) - c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned')", (t["id"],)).fetchone()[0]
-                if dd <= mon + timedelta(days=6): rem, last = left, max(min((dd - mon).days, 6), td)
-                else: rem, last = -(-left * (7 - td) // ((dd - today).days + 1)), 6
-                if left > 0 and dd < today: overdue.append(t["title"])
-            if rem <= 0: continue
-            rng = range(td, last + 1)
-            rem = place(c, u, t, rem, days, rng, -(-rem // len(rng) // 30) * 30 or 30)  # spread evenly
-            rem = place(c, u, t, rem, days, rng, 10**6)                                  # then fill what's left
-            if rem > 0: unplaced.append({"title": t["title"], "minutes": rem})
-    return {"unplaced": unplaced, "overdue": overdue}
+            dd, total = due(t), int(t["hours"] * 60)
+            if dd is None:
+                for w in range(H):
+                    used = c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned') AND week=?", (t["id"], (mon + timedelta(days=7 * w)).isoformat())).fetchone()[0]
+                    rng, rem = range(max(0, 7 * w - td), min(K, 7 * w + 7 - td)), total - used
+                    if rem > 0 and len(rng):
+                        rem = fill(c, u, t, rem, days, rng)
+                        if rem > 0: unplaced[t["title"]] = unplaced.get(t["title"], 0) + rem
+            else:
+                rem = total - c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned')", (t["id"],)).fetchone()[0]
+                if rem <= 0: continue
+                if dd < today: overdue.append(t["title"])
+                rem = fill(c, u, t, rem, days, range(0, min(max((dd - today).days, 0), K - 1) + 1))
+                if rem > 0: unplaced[t["title"]] = unplaced.get(t["title"], 0) + rem
+    return {"unplaced": [{"title": k, "minutes": v} for k, v in unplaced.items()], "overdue": overdue}
+
 
 @app.post("/api/feedback")
 def feedback(f: Feedback, u=Depends(uid)):
