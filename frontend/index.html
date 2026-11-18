@@ -119,8 +119,24 @@ function mode(m){M=m;$("#tsu").className=m=="signup"?"on":"";$("#tli").className
 async function submitAuth(){const j=await api(M,"POST",{email:$("#em").value,password:$("#pw").value});if(j){T=j.token;localStorage.setItem("t",T);show()}}
 function logout(){T=null;localStorage.removeItem("t");$("#auth").hidden=false;$("#app").hidden=true}
 async function show(){const s=await api("state");if(!s)return;ST=s;$("#auth").hidden=true;$("#app").hidden=false;S=s.start??480;E=s.end??1320;$("#lm").value=s.limit;$("#ls").value=hm(S);$("#le").value=hm(E);$("#lms").value=s.min_slot??45;draw()}
-async function setLimit(){if(await api("limit","PUT",{hours:+$("#lm").value}))toast("Ліміт збережено")}
-async function replan(){const j=await api("replan","POST");if(!j)return;W=0;await show();const w=$("#warn");if(j.overdue&&j.overdue.length)toast("Прострочено: "+j.overdue.join(", "),1);if(j.unplaced.length){w.hidden=false;w.textContent="Не вмістилося: "+j.unplaced.map(u=>`${u.title} (${h1(u.minutes)} год)`).join(", ")+". Збільште ліміт, змініть дедлайн або приберіть частину подій."}else{w.hidden=true;if(!(j.overdue&&j.overdue.length))toast("План оновлено")}}
+async function replan(){const j=await api("replan","POST");if(!j)return;W=0;await show();const w=$("#warn");if(j.unplaced.length){w.hidden=false;w.textContent="Не вмістилося: "+j.unplaced.map(u=>`${u.title} (${h1(u.minutes)} год)`).join(", ")+". Збільште ліміт, змініть дедлайн або приберіть частину подій."}else{w.hidden=true;toast("План оновлено")}}
+async function setLimit(){
+  const st = mn($("#ls").value), en = mn($("#le").value);
+  if (en - st < 60) return toast("Мінімум 1 година", 1);
+  const body = {
+    hours: Number($("#lm").value) || 6,
+    start: Number(st),
+    end: Number(en),
+    min_slot: Number($("#lms")?.value) || 45,
+    max_slot: Number($("#lmx")?.value) || 90,
+    brk: $("#lbr") && $("#lbr").value !== "" ? Number($("#lbr").value) : 10
+  };
+  if (await api("limit", "PUT", body)) {
+    S = st; E = en;
+    toast("Налаштування збережено");
+    draw();
+  }
+}
 async function toggle(id){const x=ST.slots.find(s=>s.id==id);if(await api(`slots/${id}/${x.status=="done"?"planned":"done"}`,"POST")){closePop();show()}}
 async function miss(id){if(await api(`slots/${id}/missed`,"POST")){closePop();toast("Позначено пропущеним. Натисніть «Перепланувати»");show()}}
 async function del(k,id){if(await api(`${k}/${id}`,"DELETE")){closePop();show()}}
