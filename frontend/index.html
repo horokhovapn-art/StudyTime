@@ -64,6 +64,8 @@ main{display:grid;grid-template-columns:268px 1fr;gap:18px;padding:16px 20px;max
 #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:10px;z-index:40;font-size:14px}#toast.err{background:var(--bad);color:#fff}
 @media(max-width:900px){#auth{grid-template-columns:1fr}.hero{padding:30px 22px}main{grid-template-columns:1fr;padding:12px}.side{position:static}.kpis{grid-template-columns:1fr}}
 @media(max-width:640px){header{padding:10px 12px;gap:10px}.wk{min-width:100%;justify-content:space-between}.wk h2{font-size:15px}.hr{width:100%;justify-content:space-between}.hr button,.hr .btn{flex:1;padding:0 8px;font-size:13px}.kpis{gap:6px}.kpi{padding:8px;flex-direction:column;align-items:flex-start;gap:4px}.kpi b{font-size:18px}.bd{width:28px;height:28px}.cal{max-height:68vh;-webkit-overflow-scrolling:touch}.mdl{padding:16px}.row{flex-direction:column}}@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.lim input[type=time]{width:74px;padding:5px 4px;text-align:center}.lim input[type=time]::-webkit-calendar-picker-indicator{display:none;-webkit-appearance:none}
+.ldbar{width:70%;height:4px;border-radius:999px;background:var(--line);margin:5px auto 0;overflow:hidden}.ldbar i{display:block;height:100%;border-radius:999px;transition:width .25s,background .25s}
 </style></head><body>
 <div id=auth hidden>
  <div class=hero><div class=logo>📚 StudyTime</div><h1></h1>Встигати все і не вигорати під час сесії</h1>
@@ -82,7 +84,7 @@ main{display:grid;grid-template-columns:268px 1fr;gap:18px;padding:16px 20px;max
 <main><aside class=side>
  <button class=btn onclick="openM({})"><i data-i=plus></i>Створити</button>
  <div class=panel><h2>Активні завдання</h2><div id=tasks></div></div>
- <div class=panel><div class=lim><b style="flex:1;font-weight:600">Ліміт на день</b><input id=lm type=number min=1 max=14 step=.5 onchange=setLimit()><span class=mute>год</span></div><div class=lim style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><span class=mute style="flex:1">Години:</span><input id=ls type=time step=3600 style="width:88px;padding:4px 6px" onchange=setLimit()><span class=mute>–</span><input id=le type=time step=3600 style="width:88px;padding:4px 6px" onchange=setLimit()></div></div>
+ <div class=panel><div class=lim><b style="flex:1;font-weight:600">Ліміт на день</b><input id=lm type=number min=1 max=14 step=.5 onchange=setLimit()><span class=mute>год</span></div><div class=lim style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><span class=mute style="flex:1">Години:</span><input id=ls type=time step=3600 style="width:88px;padding:4px 6px" onchange=setLimit()><span class=mute>–</span><input id=le type=time step=3600 onchange=setLimit()></div><div class=lim style="margin-top:10px;padding-top:10px;border-top:1px solid var(--line)"><span class=mute style="flex:1">Мін. слот</span><input id=lms type=number min=15 max=90 step=15 value=45 onchange=setLimit()><span class=mute>хв</span></div></div>
  <div class=panel><h2>Категорії</h2><div class=leg id=leg></div></div>
 </aside>
 <section>
@@ -116,7 +118,7 @@ const j=await r.json().catch(()=>({}));if(r.status==401&&T){logout();return}if(!
 function mode(m){M=m;$("#tsu").className=m=="signup"?"on":"";$("#tli").className=m=="login"?"on":"";$("#ab").textContent=m=="signup"?"Зареєструватися":"Увійти";$("#at").textContent=m=="signup"?"Створіть акаунт":"З поверненням"}
 async function submitAuth(){const j=await api(M,"POST",{email:$("#em").value,password:$("#pw").value});if(j){T=j.token;localStorage.setItem("t",T);show()}}
 function logout(){T=null;localStorage.removeItem("t");$("#auth").hidden=false;$("#app").hidden=true}
-async function show(){const s=await api("state");if(!s)return;ST=s;$("#auth").hidden=true;$("#app").hidden=false;S=s.start??480;E=s.end??1320;$("#lm").value=s.limit;$("#ls").value=hm(S);$("#le").value=hm(E);draw()}
+async function show(){const s=await api("state");if(!s)return;ST=s;$("#auth").hidden=true;$("#app").hidden=false;S=s.start??480;E=s.end??1320;$("#lm").value=s.limit;$("#ls").value=hm(S);$("#le").value=hm(E);$("#lms").value=s.min_slot??45;draw()}
 async function setLimit(){if(await api("limit","PUT",{hours:+$("#lm").value}))toast("Ліміт збережено")}
 async function replan(){const j=await api("replan","POST");if(!j)return;W=0;await show();const w=$("#warn");if(j.overdue&&j.overdue.length)toast("Прострочено: "+j.overdue.join(", "),1);if(j.unplaced.length){w.hidden=false;w.textContent="Не вмістилося: "+j.unplaced.map(u=>`${u.title} (${h1(u.minutes)} год)`).join(", ")+". Збільште ліміт, змініть дедлайн або приберіть частину подій."}else{w.hidden=true;if(!(j.overdue&&j.overdue.length))toast("План оновлено")}}
 async function toggle(id){const x=ST.slots.find(s=>s.id==id);if(await api(`slots/${id}/${x.status=="done"?"planned":"done"}`,"POST")){closePop();show()}}
@@ -156,7 +158,7 @@ function draw(){const s=ST,wk=iso(mon()),sl=s.slots.filter(x=>x.week==wk),vis=c=
  const sum=st=>sl.filter(x=>x.status==st).reduce((q,x)=>q+x.end-x.start,0),pl=sum("planned"),dn=sum("done");$("#s1").textContent=h1(pl+dn);$("#s2").textContent=h1(dn);$("#s3").textContent=h1(sum("missed"));
  const pc=pl+dn?Math.round(dn/(pl+dn)*100):0;$("#pb").style.width=pc+"%";$("#pp").textContent=pc+"%";
  const nd=new Date(),td=W==0?(nd.getDay()+6)%7:-1,nm=nd.getHours()*60+nd.getMinutes(),H=(E-S)*PX,showNow=W==0&&nm>=S&&nm<=E;
- let g=`<div class=grid style="--P:${PX}"><div class=hd></div>`+D.map((d,i)=>{const dt=new Date(a);dt.setDate(a.getDate()+i);return `<div class="hd ${i==td?"today":""}">${d}<br><span class=dn>${dt.getDate()}</span></div>`}).join("")
+ let g=`<div class=grid style="--P:${PX}"><div class=hd></div>`+D.map((d,i)=>{const dt=new Date(a);dt.setDate(a.getDate()+i);const dIso=iso(dt),bM=s.busy.filter(x=>x.day==i&&(!x.event_date||x.event_date==dIso)).reduce((q,x)=>q+Math.max(0,x.end-x.start),0),sM=sl.filter(x=>x.day==i&&x.status!="missed").reduce((q,x)=>q+Math.max(0,x.end-x.start),0),totH=(bM+sM)/60,pct=s.limit?totH/s.limit*100:0,col=totH==0?"var(--line)":pct<55?"linear-gradient(90deg,#22C55E,#4ADE80)":pct<=95?"linear-gradient(90deg,#84CC16,#F59E0B)":pct<=100?"linear-gradient(90deg,#F59E0B,#F97316)":"linear-gradient(90deg,#EF4444,#DC2626)",wPct=totH==0?100:Math.min(100,Math.round(pct));return `<div class="hd ${i==td?"today":""}" title="??????????????: ${Math.round(totH*10)/10} / ${s.limit} ???">${d}<br><span class=dn>${dt.getDate()}</span><div class=ldbar><i style="width:${wPct}%;background:${col}"></i></div></div>`}).join("")
  +`<div class=axis style="--H:${H}">`+Array.from({length:Math.floor((E-S)/60)+1},(_,i)=>`<span style="top:${i*60*PX}px">${p2(Math.floor(S/60)+i)}:00</span>`).join("")+(showNow?`<em style="top:${(nm-S)*PX}px">${hm(nm)}</em>`:"")+"</div>";
  const pos=(x,y)=>`top:${(Math.max(x,S)-S)*PX}px;height:${(Math.min(y,E)-Math.max(x,S))*PX-2}px`,sm=(x,y)=>(y-x)*PX<44?" sm":"";
  for(let d=0;d<7;d++){g+=`<div class="col ${d==td?"today":""}" style="--H:${H}" onclick="colClick(event,${d})" ondragover="event.preventDefault()" ondrop="drp(event,${d})">`

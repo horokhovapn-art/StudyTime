@@ -23,7 +23,7 @@ with db() as _c:
     CREATE TABLE IF NOT EXISTS feedback(id INTEGER PRIMARY KEY, user_id INT, rating INT, text TEXT, created TEXT);
     CREATE TABLE IF NOT EXISTS slots(id INTEGER PRIMARY KEY, user_id INT, task_id INT, day INT, start INT, end INT, status TEXT DEFAULT 'planned');
     """)
-    for tb, col in (("busy", "cat TEXT DEFAULT 'study'"), ("busy", "event_date TEXT"), ("tasks", "cat TEXT DEFAULT 'study'"), ("tasks", "deadline_date TEXT"), ("slots", "week TEXT DEFAULT ''"), ("slots", "pinned INT DEFAULT 0"), ("users", "start_m INT DEFAULT 480"), ("users", "end_m INT DEFAULT 1320")):
+    for tb, col in (("busy", "cat TEXT DEFAULT 'study'"), ("busy", "event_date TEXT"), ("tasks", "cat TEXT DEFAULT 'study'"), ("tasks", "deadline_date TEXT"), ("slots", "week TEXT DEFAULT ''"), ("slots", "pinned INT DEFAULT 0"), ("users", "start_m INT DEFAULT 480"), ("users", "end_m INT DEFAULT 1320"), ("users", "min_slot INT DEFAULT 45")):
         try: _c.execute(f"ALTER TABLE {tb} ADD COLUMN {col}")
         except sqlite3.OperationalError: pass
     _c.execute("UPDATE slots SET week=? WHERE week='' OR week IS NULL", ((date.today() - timedelta(days=date.today().weekday())).isoformat(),))
@@ -49,7 +49,7 @@ class Busy(BaseModel): day: int; start: int; end: int; title: str; cat: str = 's
 class NewSlot(BaseModel): task_id: int; day: int; start: int; end: int; week: str
 class Move(BaseModel): day: int; start: int; end: int
 class Task(BaseModel): title: str; kind: str = "regular"; hours: float; deadline_day: int | None = None; deadline_date: str | None = None; cat: str = 'study'
-class Limit(BaseModel): hours: float; start: int = 480; end: int = 1320
+class Limit(BaseModel): hours: float; start: int = 480; end: int = 1320; min_slot: int = 45
 class Feedback(BaseModel): rating: int; text: str
 
 def check_date(v):
@@ -79,7 +79,7 @@ def state(u=Depends(uid)):
         return {"busy": q("SELECT * FROM busy WHERE user_id=? ORDER BY day,start"),
                 "tasks": q("SELECT * FROM tasks WHERE user_id=?"),
                 "slots": q("SELECT s.*,t.title,t.cat FROM slots s JOIN tasks t ON t.id=s.task_id WHERE s.user_id=? ORDER BY day,start"),
-                "limit": (ur := c.execute("SELECT limit_h, start_m, end_m FROM users WHERE id=?", (u,)).fetchone())[0], "start": ur[1] or 480, "end": ur[2] or 1320}
+                "limit": (ur := c.execute("SELECT limit_h, start_m, end_m, min_slot FROM users WHERE id=?", (u,)).fetchone())[0], "start": ur[1] or 480, "end": ur[2] or 1320, "min_slot": ur[3] or 45}
 
 @app.post("/api/busy")
 def add_busy(b: Busy, u=Depends(uid)):
@@ -111,7 +111,8 @@ def del_task(i: int, u=Depends(uid)):
 def limit(l: Limit, u=Depends(uid)):
     st, en = max(0, min(l.start, 1380)), max(60, min(l.end, 1440))
     if en - st < 60: raise HTTPException(400, "???????? ??? ???? ???? ? 1 ???")
-    with db() as c: c.execute("UPDATE users SET limit_h=?, start_m=?, end_m=? WHERE id=?", (max(1, min(l.hours, 14)), st, en, u))
+    ms = max(15, min(l.min_slot, 90))
+    with db() as c: c.execute("UPDATE users SET limit_h=?, start_m=?, end_m=?, min_slot=? WHERE id=?", (max(1, min(l.hours, 14)), st, en, ms, u))
     return {}
 
 @app.post("/api/slots/{i}/{status}")
@@ -154,20 +155,24 @@ def del_slot(i: int, u=Depends(uid)):
     with db() as c: c.execute("DELETE FROM slots WHERE id=? AND user_id=?", (i, u))
     return {}
 
-def place(c, u, t, rem, days, rng, per):
+def place(c, u, t, rem, days, rng, per, ms=45):
     for k in rng:
         D, got = days[k], 0
         for g in D["gaps"]:
-            while rem > 0 and D["cap"] > 0 and got < per and g[1] - g[0] >= 30:
+            while rem >= ms and D["cap"] >= ms and got < per and g[1] - g[0] >= ms:
                 n = min(90, g[1] - g[0], rem, D["cap"], per - got)
-                if n <= 0: break
-                c.execute("INSERT INTO slots(user_id,task_id,day,start,end,week) VALUES(?,?,?,?,?,?)", (u, t["id"], D["d"], g[0], g[0] + n, D["wk"]))
+                if n < ms: break
+                left = rem - n
+                if 0 < left < ms:
+                    if n + left <= min(90, g[1] - g[0], D["cap"]): n += left
+                    elif n - (ms - left) >= ms: n -= (ms - left)
+                c.execute("INSERT INTO slots(user_id,task_id,day,start,end,week) VALUES(?,?,?,?,?,?)", (u, t["id"], D.get("d", k), g[0], g[0] + n, D.get("wk", days.get("wk"))))
                 g[0] += n + 10; D["cap"] -= n; got += n; rem -= n
     return rem
 
-def fill(c, u, t, rem, days, rng):
-    rem = place(c, u, t, rem, days, rng, -(-rem // len(rng) // 30) * 30 or 30)
-    return place(c, u, t, rem, days, rng, 10**6)
+def fill(c, u, t, rem, days, rng, ms=45):
+    rem = place(c, u, t, rem, days, rng, max(ms, -(-rem // len(rng) // 15) * 15), ms)
+    return place(c, u, t, rem, days, rng, 10**6, ms)
 
 @app.post("/api/replan")
 def replan(u=Depends(uid)):
@@ -178,8 +183,8 @@ def replan(u=Depends(uid)):
     with db() as c:
         c.execute("UPDATE slots SET status='missed' WHERE user_id=? AND status='planned' AND (week<? OR (week=? AND (day<? OR (day=? AND end<=?))))", (u, wk, wk, td, td, nm))
         c.execute("DELETE FROM slots WHERE user_id=? AND pinned=0 AND status='planned' AND (week>? OR (week=? AND (day>? OR (day=? AND start>=?))))", (u, wk, wk, td, td, nm))
-        uc = c.execute("SELECT limit_h, start_m, end_m FROM users WHERE id=?", (u,)).fetchone()
-        lim, st_m, en_m = uc[0] * 60, (uc[1] or START), (uc[2] or END)
+        uc = c.execute("SELECT limit_h, start_m, end_m, min_slot FROM users WHERE id=?", (u,)).fetchone()
+        lim, st_m, en_m, ms = uc[0] * 60, (uc[1] or START), (uc[2] or END), (uc[3] or 45)
         tasks = c.execute("SELECT * FROM tasks WHERE user_id=?", (u,)).fetchall()
         def due(t):
             if t["deadline_date"]:
@@ -199,9 +204,9 @@ def replan(u=Depends(uid)):
             if k == 0: iv.append((0, nm))
             gaps, cur = [], st_m
             for a, b in sorted(iv):
-                if a - cur >= 30: gaps.append([cur, a])
+                if a - cur >= ms: gaps.append([cur, a])
                 cur = max(cur, b)
-            if en_m - cur >= 30: gaps.append([cur, en_m])
+            if en_m - cur >= ms: gaps.append([cur, en_m])
             days[k] = {"d": d, "wk": w, "gaps": gaps, "cap": max(0, lim - sum(r["end"] - r["start"] for r in sl))}
         for t in sorted(tasks, key=lambda t: (due(t) is None, due(t) or date.max)):
             dd, total = due(t), int(t["hours"] * 60)
@@ -210,13 +215,13 @@ def replan(u=Depends(uid)):
                     used = c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned') AND week=?", (t["id"], (mon + timedelta(days=7 * w)).isoformat())).fetchone()[0]
                     rng, rem = range(max(0, 7 * w - td), min(K, 7 * w + 7 - td)), total - used
                     if rem > 0 and len(rng):
-                        rem = fill(c, u, t, rem, days, rng)
+                        rem = fill(c, u, t, rem, days, rng, ms)
                         if rem > 0: unplaced[t["title"]] = unplaced.get(t["title"], 0) + rem
             else:
                 rem = total - c.execute("SELECT COALESCE(SUM(end-start),0) FROM slots WHERE task_id=? AND status IN('done','planned')", (t["id"],)).fetchone()[0]
                 if rem <= 0: continue
                 if dd < today: overdue.append(t["title"])
-                rem = fill(c, u, t, rem, days, range(0, min(max((dd - today).days, 0), K - 1) + 1))
+                rem = fill(c, u, t, rem, days, range(0, min(max((dd - today).days, 0), K - 1) + 1), ms)
                 if rem > 0: unplaced[t["title"]] = unplaced.get(t["title"], 0) + rem
     return {"unplaced": [{"title": k, "minutes": v} for k, v in unplaced.items()], "overdue": overdue}
 
