@@ -136,6 +136,17 @@ def edit_task(i: int, t: Task, u=Depends(uid)):
     with db() as c: c.execute("UPDATE tasks SET title=?,kind=?,hours=?,deadline_day=?,deadline_date=?,cat=? WHERE id=? AND user_id=?", (t.title, t.kind, t.hours, t.deadline_day, dd, t.cat, i, u))
     return {}
 
+def has_overlap(c, u, day, start, end, week, skip_slot_id=None):
+    d_iso = (date.fromisoformat(week) + timedelta(days=day)).isoformat()
+    if c.execute("SELECT 1 FROM busy WHERE user_id=? AND day=? AND (event_date IS NULL OR event_date='' OR event_date=?) AND start<? AND end>?", (u, day, d_iso, end, start)).fetchone():
+        return True
+    q = "SELECT 1 FROM slots WHERE user_id=? AND day=? AND week=? AND status!='missed' AND start<? AND end>?"
+    p = [u, day, week, end, start]
+    if skip_slot_id is not None:
+        q += " AND id!=?"
+        p.append(skip_slot_id)
+    return bool(c.execute(q, p).fetchone())
+
 @app.post("/api/slots")
 def new_slot(n: NewSlot, u=Depends(uid)):
     if not (0 <= n.day <= 6 and 0 <= n.start < n.end <= 1440 and len(n.week) == 10): raise HTTPException(400, "Некоректний час")
@@ -147,7 +158,10 @@ def new_slot(n: NewSlot, u=Depends(uid)):
 @app.put("/api/slots/{i}")
 def move_slot(i: int, m: Move, u=Depends(uid)):
     if not (0 <= m.day <= 6 and 0 <= m.start < m.end <= 1440): raise HTTPException(400, "Некоректний час")
-    with db() as c: c.execute("UPDATE slots SET day=?,start=?,end=?,pinned=1 WHERE id=? AND user_id=?", (m.day, m.start, m.end, i, u))
+    with db() as c:
+        row = c.execute("SELECT week FROM slots WHERE id=? AND user_id=?", (i, u)).fetchone()
+        if row and has_overlap(c, u, m.day, m.start, m.end, row["week"], skip_slot_id=i): raise HTTPException(400, "??? ??? ??? ????????")
+        c.execute("UPDATE slots SET day=?,start=?,end=?,pinned=1 WHERE id=? AND user_id=?", (m.day, m.start, m.end, i, u))
     return {}
 
 @app.delete("/api/slots/{i}")
